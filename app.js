@@ -119,8 +119,13 @@ function setBG(mode){
   document.body.className = mode; // "japan" / "world" / ""
 }
 
-// 経度緯度 → 地図SVG座標（viewBox 0 0 360 180, 経度+180, 90-緯度）
-function lonlat(c){ return { x: c.lon+180, y: 90-c.lat }; }
+// 経度緯度 → メルカトル図法のSVG座標（world-geo.js と同じ式）
+const MERC_K = 360/(2*Math.PI);
+function merc(lon, lat){
+  lat = Math.max(-85, Math.min(84, lat));
+  return { x: lon+180, y: 180 - MERC_K*Math.log(Math.tan(Math.PI/4 + lat*Math.PI/360)) };
+}
+function lonlat(c){ return merc(c.lon, c.lat); }
 
 function renderHome(){
   setBG("");
@@ -212,7 +217,7 @@ function renderWorldMap(){
   // クリア済みの国を訪問順（WORLD_STAGES順）でルート結線
   const visited = WORLD_STAGES.filter(s=>STATE.world[s.id]&&STATE.world[s.id].cleared)
                               .map(s=>COUNTRIES.find(c=>c.id===s.countryId));
-  const tokyo = {x:139+180, y:90-36};
+  const tokyo = merc(139.7, 35.7);
   let pts = [tokyo, ...visited.map(lonlat)];
   let line = "";
   for(let i=1;i<pts.length;i++){
@@ -274,9 +279,9 @@ function renderWorldMap(){
       <animateMotion dur="${dur}s" repeatCount="indefinite" rotate="0" path="${motionPath}"/>
     </g>`;
 
-  wrap.innerHTML = `<svg viewBox="0 0 360 180" preserveAspectRatio="xMidYMid meet">
+  wrap.innerHTML = `<svg viewBox="0 0 360 252" preserveAspectRatio="xMidYMid meet">
     <defs><clipPath id="faceClip"><circle cx="0" cy="-0.5" r="5.3"/></clipPath></defs>
-    <rect x="0" y="0" width="360" height="180" class="ocean"/>
+    <rect x="0" y="0" width="360" height="252" class="ocean"/>
     <g class="land">${WORLD_LAND_PATHS.map(d=>`<path d="${d}"/>`).join("")}</g>
     ${line}
     ${dots}
