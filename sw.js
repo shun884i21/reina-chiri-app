@@ -1,23 +1,57 @@
-// シンプルなオフラインキャッシュ
-const CACHE = "reina-chiri-v5";
+// オフラインキャッシュ（壊れにくい版）
+const CACHE = "reina-chiri-v6";
 const ASSETS = [
   "./", "./index.html", "./style.css",
   "./data.js", "./world-geo.js", "./app.js",
   "./manifest.json", "./icon-192.png", "./icon-512.png"
 ];
+
 self.addEventListener("install", e=>{
-  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));
+  e.waitUntil((async()=>{
+    const c = await caches.open(CACHE);
+    // 1ファイル失敗しても全体を止めない（index.html は必ず入れる）
+    await Promise.allSettled(ASSETS.map(u=>c.add(u)));
+    await self.skipWaiting();
+  })());
 });
+
 self.addEventListener("activate", e=>{
-  e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));
+  e.waitUntil((async()=>{
+    const ks = await caches.keys();
+    await Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)));
+    await self.clients.claim();
+  })());
 });
+
 self.addEventListener("fetch", e=>{
-  if(e.request.method!=="GET") return;
-  e.respondWith(
-    caches.match(e.request).then(r=> r || fetch(e.request).then(resp=>{
-      const copy=resp.clone();
-      caches.open(CACHE).then(c=>c.put(e.request, copy)).catch(()=>{});
+  const req = e.request;
+  if(req.method!=="GET") return;
+
+  // ページ遷移はネット優先（最新を取得）、ダメなら index.html
+  if(req.mode==="navigate"){
+    e.respondWith((async()=>{
+      try{
+        const fresh = await fetch(req);
+        const c = await caches.open(CACHE); c.put("./index.html", fresh.clone()).catch(()=>{});
+        return fresh;
+      }catch(_){
+        const cached = await caches.match("./index.html") || await caches.match("./");
+        return cached || new Response("<h1>オフラインです</h1>", {headers:{"Content-Type":"text/html; charset=utf-8"}});
+      }
+    })());
+    return;
+  }
+
+  // それ以外はキャッシュ優先→ネット
+  e.respondWith((async()=>{
+    const cached = await caches.match(req);
+    if(cached) return cached;
+    try{
+      const resp = await fetch(req);
+      const c = await caches.open(CACHE); c.put(req, resp.clone()).catch(()=>{});
       return resp;
-    }).catch(()=>caches.match("./index.html")))
-  );
+    }catch(_){
+      return new Response("", {status:504, statusText:"offline"});
+    }
+  })());
 });
