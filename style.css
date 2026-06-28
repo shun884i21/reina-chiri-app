@@ -71,6 +71,11 @@ body.world{background:linear-gradient(160deg,#dcefff,#eafff7);}
 .dot.done{fill:var(--pink); stroke:#fff; stroke-width:.8;}
 .dot.home{fill:var(--yellow); stroke:#e6a800; stroke-width:.8;}
 .map-cap{text-align:center; font-size:.8rem; font-weight:700; color:#3a7; padding:6px;}
+.photo-ctrl{display:flex; gap:8px; justify-content:center; padding:0 8px 10px; flex-wrap:wrap;}
+.photo-btn{background:var(--pink); color:#fff; border:none; border-radius:999px;
+  padding:9px 16px; font-weight:800; font-size:.85rem; cursor:pointer; box-shadow:var(--shadow);}
+.photo-btn.ghost{background:#fff; color:#888;}
+.plane{filter:drop-shadow(0 1px 1px rgba(0,0,0,.25));}
 
 /* ---- クイズ ---- */
 .quiz-head{display:flex; justify-content:space-between; align-items:center; font-weight:700; font-size:.9rem;}

@@ -1,6 +1,6 @@
 {
-  "name": "レイナのチリ勉強アプリ",
-  "short_name": "チリ勉強",
+  "name": "伶奈の地理勉強アプリ",
+  "short_name": "地理勉強",
   "description": "中1社会・地理を世界一周しながら学ぶアプリ",
   "start_url": "./index.html",
   "scope": "./",

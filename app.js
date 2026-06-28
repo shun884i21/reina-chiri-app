@@ -131,7 +131,7 @@ function renderHome(){
   const stampCount = Object.keys(STATE.stamps).length;
 
   const root = el("div","screen home");
-  root.appendChild(el("div","logo","🌏 レイナのチリ勉強アプリ"));
+  root.appendChild(el("div","logo","🌏 伶奈の地理勉強アプリ"));
   root.appendChild(el("p","tagline","日本を旅して、世界一周にでかけよう！"));
 
   // 日本編カード
@@ -226,14 +226,79 @@ function renderWorldMap(){
   // 出発地・東京
   dots += `<circle cx="${tokyo.x}" cy="${tokyo.y}" r="3" class="dot home"/>`;
 
+  // 伶奈ちゃんを乗せた飛行機が地図の上を旅して回る
+  let motionPath;
+  if(visited.length>=1){
+    motionPath = "M" + pts.map(p=>`${p.x} ${p.y}`).join(" L ") + ` L ${tokyo.x} ${tokyo.y}`;
+  }else{
+    // まだ国がないときは東京の上をくるくる
+    const r=8;
+    motionPath = `M ${tokyo.x-r} ${tokyo.y} a ${r} ${r} 0 1 0 ${2*r} 0 a ${r} ${r} 0 1 0 ${-2*r} 0`;
+  }
+  const dur = Math.max(10, (visited.length+1)*4);
+  const face = STATE.photo
+    ? `<image href="${STATE.photo}" x="-7.2" y="-11.2" width="14.4" height="14.4" clip-path="url(#faceClip)" preserveAspectRatio="xMidYMid slice"/>`
+    : `<text x="0" y="-0.5" text-anchor="middle" font-size="9">👧</text>`;
+  const plane = `
+    <g class="plane">
+      <text x="0" y="7" text-anchor="middle" font-size="19">✈️</text>
+      <circle cx="0" cy="-4" r="8" fill="#fff" stroke="#ff5d8f" stroke-width="1.3"/>
+      ${face}
+      <animateMotion dur="${dur}s" repeatCount="indefinite" rotate="0" path="${motionPath}"/>
+    </g>`;
+
   wrap.innerHTML = `<svg viewBox="0 0 360 180" preserveAspectRatio="xMidYMid meet">
+    <defs><clipPath id="faceClip"><circle cx="0" cy="-4" r="7.2"/></clipPath></defs>
     <rect x="0" y="0" width="360" height="180" class="ocean"/>
     ${WORLD_CONTINENTS}
     ${line}
     ${dots}
+    ${plane}
   </svg>
-  <div class="map-cap">✈️ 訪れた国 ${visited.length} / ${COUNTRIES.length}</div>`;
+  <div class="map-cap">✈️ 伶奈ちゃん世界一周中！　訪れた国 ${visited.length} / ${COUNTRIES.length}</div>`;
+
+  // 顔写真の設定ボタン
+  const ctrl = el("div","photo-ctrl");
+  const fileInput = el("input"); fileInput.type="file"; fileInput.accept="image/*"; fileInput.style.display="none";
+  const setBtn = el("button","photo-btn", STATE.photo? "📷 顔写真を変える" : "📷 飛行機に顔写真をのせる");
+  setBtn.onclick = ()=> fileInput.click();
+  fileInput.onchange = ()=>{
+    const f = fileInput.files && fileInput.files[0];
+    if(!f) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      resizePhoto(reader.result, 160, (data)=>{
+        STATE.photo = data; save(STATE);
+        renderStageSelect("world");
+      });
+    };
+    reader.readAsDataURL(f);
+  };
+  ctrl.appendChild(setBtn);
+  ctrl.appendChild(fileInput);
+  if(STATE.photo){
+    const del = el("button","photo-btn ghost","写真をけす");
+    del.onclick = ()=>{ delete STATE.photo; save(STATE); renderStageSelect("world"); };
+    ctrl.appendChild(del);
+  }
+  wrap.appendChild(ctrl);
   return wrap;
+}
+
+// 写真を小さくリサイズしてlocalStorageに収める（正方形に切り抜き）
+function resizePhoto(dataUrl, size, cb){
+  const img = new Image();
+  img.onload = ()=>{
+    const c = document.createElement("canvas");
+    c.width = size; c.height = size;
+    const ctx = c.getContext("2d");
+    const s = Math.min(img.width, img.height);
+    const sx = (img.width - s)/2, sy = (img.height - s)/2;
+    ctx.drawImage(img, sx, sy, s, s, 0, 0, size, size);
+    cb(c.toDataURL("image/jpeg", 0.82));
+  };
+  img.onerror = ()=> cb(dataUrl);
+  img.src = dataUrl;
 }
 
 // ---------- クイズ ----------
