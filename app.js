@@ -236,21 +236,55 @@ function renderWorldMap(){
     motionPath = `M ${tokyo.x-r} ${tokyo.y} a ${r} ${r} 0 1 0 ${2*r} 0 a ${r} ${r} 0 1 0 ${-2*r} 0`;
   }
   const dur = Math.max(10, (visited.length+1)*4);
+  // 顔（写真 or デフォルトの女の子）。窓の中身だけ差し替え
   const face = STATE.photo
-    ? `<image href="${STATE.photo}" x="-7.2" y="-11.2" width="14.4" height="14.4" clip-path="url(#faceClip)" preserveAspectRatio="xMidYMid slice"/>`
-    : `<text x="0" y="-0.5" text-anchor="middle" font-size="9">👧</text>`;
+    ? `<image href="${STATE.photo}" x="-6.5" y="-9.5" width="13" height="13" clip-path="url(#faceClip)" preserveAspectRatio="xMidYMid slice"/>`
+    : `<g>
+        <circle cx="0" cy="-3" r="5" fill="#ffe0bd"/>
+        <path d="M-5 -3 A5 5 0 0 1 5 -3 L3.7 -4.4 A3.8 3.8 0 0 0 -3.7 -4.4 Z" fill="#6b4423"/>
+        <circle cx="-1.9" cy="-2.8" r="0.8" fill="#3a2a20"/>
+        <circle cx="1.9" cy="-2.8" r="0.8" fill="#3a2a20"/>
+        <circle cx="-1.6" cy="-3.1" r="0.25" fill="#fff"/>
+        <circle cx="2.2" cy="-3.1" r="0.25" fill="#fff"/>
+        <circle cx="-3.1" cy="-1.4" r="1" fill="#ffb3c6" opacity="0.85"/>
+        <circle cx="3.1" cy="-1.4" r="1" fill="#ffb3c6" opacity="0.85"/>
+        <path d="M-1.5 -1.3 Q0 -0.1 1.5 -1.3" fill="none" stroke="#c0392b" stroke-width="0.6" stroke-linecap="round"/>
+      </g>`;
+  // かわいい飛行機（ツインテール＋リボン＋ひこうき雲＋キラキラ）
+  const planeInner = `
+    <path d="M-19 5 q-12 1 -24 -3" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="0.5 4" opacity="0.85"/>
+    <path d="M-17 0 q-10 -1 -20 -5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="0.5 4" opacity="0.6"/>
+    <ellipse cx="-2" cy="9" rx="4" ry="8" fill="#a9e0ff" stroke="#5db0e8" stroke-width="0.7" transform="rotate(30 -2 9)"/>
+    <path d="M-14 1 L-19 -4 L-19 6 Z" fill="#ff9ec0" stroke="#e63e72" stroke-width="0.6"/>
+    <path d="M-16 -1 L-21 -7 L-17 -1 Z" fill="#ffd23f" stroke="#e6a800" stroke-width="0.6"/>
+    <rect x="-16" y="-4" width="31" height="12.5" rx="6.2" fill="#ffd0de" stroke="#ff5d8f" stroke-width="1.2"/>
+    <rect x="-16" y="2" width="31" height="6.5" rx="3.2" fill="#fff" opacity="0.55"/>
+    <path d="M15 -4 Q22 2.2 15 8.5 Z" fill="#ff9ec0" stroke="#e63e72" stroke-width="0.6"/>
+    <circle cx="16.5" cy="2.2" r="1.1" fill="#ffd23f" stroke="#e6a800" stroke-width="0.4"/>
+    <circle cx="-9.5" cy="2.5" r="1.7" fill="#cdeeff" stroke="#5db0e8" stroke-width="0.5"/>
+    <circle cx="9" cy="2.5" r="1.7" fill="#cdeeff" stroke="#5db0e8" stroke-width="0.5"/>
+    <circle cx="-7.5" cy="-2.5" r="2" fill="#7a4a28"/>
+    <circle cx="7.5" cy="-2.5" r="2" fill="#7a4a28"/>
+    <circle cx="-7.5" cy="-2.5" r="1" fill="#ff7aa8"/>
+    <circle cx="7.5" cy="-2.5" r="1" fill="#ff7aa8"/>
+    <circle cx="0" cy="-3" r="6.8" fill="#fff" stroke="#ff5d8f" stroke-width="1.3"/>
+    ${face}
+    <path d="M0 -9.6 L-2.4 -11.4 L-2.4 -8 Z" fill="#ff5d8f"/>
+    <path d="M0 -9.6 L2.4 -11.4 L2.4 -8 Z" fill="#ff5d8f"/>
+    <circle cx="0" cy="-9.6" r="1" fill="#ffd23f"/>
+    <path d="M-24 -8 l0.7 2 l2 0.7 l-2 0.7 l-0.7 2 l-0.7 -2 l-2 -0.7 l2 -0.7 z" fill="#fff3a8"/>
+    <path d="M20 -7 l0.5 1.4 l1.4 0.5 l-1.4 0.5 l-0.5 1.4 l-0.5 -1.4 l-1.4 -0.5 l1.4 -0.5 z" fill="#fff3a8"/>
+    <path d="M19 9 l0.5 1.4 l1.4 0.5 l-1.4 0.5 l-0.5 1.4 l-0.5 -1.4 l-1.4 -0.5 l1.4 -0.5 z" fill="#fff3a8"/>`;
   const plane = `
     <g class="plane">
-      <text x="0" y="7" text-anchor="middle" font-size="19">✈️</text>
-      <circle cx="0" cy="-4" r="8" fill="#fff" stroke="#ff5d8f" stroke-width="1.3"/>
-      ${face}
+      <g transform="scale(1.25)">${planeInner}</g>
       <animateMotion dur="${dur}s" repeatCount="indefinite" rotate="0" path="${motionPath}"/>
     </g>`;
 
   wrap.innerHTML = `<svg viewBox="0 0 360 180" preserveAspectRatio="xMidYMid meet">
-    <defs><clipPath id="faceClip"><circle cx="0" cy="-4" r="7.2"/></clipPath></defs>
+    <defs><clipPath id="faceClip"><circle cx="0" cy="-3" r="6"/></clipPath></defs>
     <rect x="0" y="0" width="360" height="180" class="ocean"/>
-    ${WORLD_CONTINENTS}
+    <g class="land">${WORLD_LAND_PATHS.map(d=>`<path d="${d}"/>`).join("")}</g>
     ${line}
     ${dots}
     ${plane}

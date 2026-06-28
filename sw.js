@@ -1,8 +1,8 @@
 // シンプルなオフラインキャッシュ
-const CACHE = "reina-chiri-v1";
+const CACHE = "reina-chiri-v3";
 const ASSETS = [
   "./", "./index.html", "./style.css",
-  "./data.js", "./map.js", "./app.js",
+  "./data.js", "./world-geo.js", "./app.js",
   "./manifest.json", "./icon-192.png", "./icon-512.png"
 ];
 self.addEventListener("install", e=>{

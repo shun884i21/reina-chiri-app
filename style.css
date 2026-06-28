@@ -65,7 +65,7 @@ body.world{background:linear-gradient(160deg,#dcefff,#eafff7);}
   box-shadow:var(--shadow); margin-bottom:6px;}
 .worldmap svg{display:block; width:100%; height:auto;}
 .ocean{fill:#bfe4fb;}
-.land path{fill:#bfe3b5; stroke:#9fd092; stroke-width:.6;}
+.land path{fill:#c7e7b0; stroke:#84b86a; stroke-width:.4; stroke-linejoin:round;}
 .route{stroke:var(--pink); stroke-width:1.2; stroke-dasharray:3 2; opacity:.9;}
 .dot{fill:#fff; stroke:#9a9ab0; stroke-width:.6;}
 .dot.done{fill:var(--pink); stroke:#fff; stroke-width:.8;}
