@@ -3,13 +3,16 @@
 
 const PASS = 7;          // 10問中7問でクリア
 const QPER = 10;         // 1ステージの問題数
+const TEST_N = 20;       // テストモードの問題数
+const TEST_TIME = 10*60; // テストモードの制限時間（秒）
 const SAVE_KEY = "reina-chiri-save-v1";
 
 const REGION_LIST = ["北海道","東北","関東","中部","近畿","中国・四国","九州・沖縄"];
 
 // ---------- セーブデータ ----------
 function defaultSave(){
-  return { japan:{}, world:{}, stamps:{}, worldUnlocked:false };
+  return { japan:{}, world:{}, drill:{}, stamps:{}, mistakes:{},
+           streak:{last:null,count:0}, testBest:null, worldUnlocked:false };
 }
 function load(){
   try{ return Object.assign(defaultSave(), JSON.parse(localStorage.getItem(SAVE_KEY)||"{}")); }
@@ -22,17 +25,65 @@ function isJapanAllCleared(){
   return JAPAN_STAGES.every(st => STATE.japan[st.id] && STATE.japan[st.id].cleared);
 }
 
+// ---------- 連続学習記録（ストリーク） ----------
+function dstr(d){ return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
+function bumpStreak(){
+  const today = dstr(new Date());
+  const y = new Date(); y.setDate(y.getDate()-1);
+  const s = STATE.streak || {last:null,count:0};
+  if(s.last===today) return;
+  s.count = (s.last===dstr(y)) ? s.count+1 : 1;
+  s.last = today;
+  STATE.streak = s;
+}
+function streakDays(){
+  const s = STATE.streak;
+  if(!s || !s.last) return 0;
+  const y = new Date(); y.setDate(y.getDate()-1);
+  return (s.last===dstr(new Date()) || s.last===dstr(y)) ? s.count : 0;
+}
+
 // ---------- ユーティリティ ----------
 function shuffle(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
 function sample(a,n){ return shuffle(a).slice(0,n); }
 function el(tag, cls, html){ const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e; }
 
-// 4択を作る：正解＋誤答プール3つ
-function makeChoice(q, answer, pool){
+// 4択を作る：正解＋誤答プール3つ（exp:解説）
+function makeChoice(q, answer, pool, exp){
   const distract = sample(pool.filter(x=>x!==answer), 3);
   const options = shuffle([answer, ...distract]);
-  return { type:"choice", q, options, answer: options.indexOf(answer) };
+  return { type:"choice", q, options, answer: options.indexOf(answer), exp };
 }
+// curated形式 {q,a,choices,exp} → 出題形式
+function curatedToQ(g){
+  const options = shuffle([g.a, ...g.choices]);
+  return { type:"choice", q:g.q, options, answer:options.indexOf(g.a), exp:g.exp };
+}
+// 書き取り問題の表記ゆれ吸収（空白除去＋ひらがな→カタカナ）
+function normalizeAns(s){
+  return (s||"").replace(/[\s　]/g,"")
+    .replace(/[ぁ-ゖ]/g, ch=>String.fromCharCode(ch.charCodeAt(0)+0x60));
+}
+
+// ---------- にがて（間違えた問題）の記録 ----------
+function serializeQ(q){
+  if(q.type==="choice") return {type:"choice", q:q.q, a:q.options[q.answer], options:q.options.slice(), exp:q.exp};
+  if(q.type==="input")  return {type:"input", q:q.q, accept:q.accept, ans:q.ans, exp:q.exp};
+  if(q.type==="order")  return {type:"order", q:q.q, items:q.items};
+  return null;
+}
+function recordMistake(q){
+  const item = serializeQ(q);
+  if(!item) return;
+  STATE.mistakes[q.q] = item;
+  const keys = Object.keys(STATE.mistakes);
+  if(keys.length>80) delete STATE.mistakes[keys[0]]; // 古いものから捨てる
+  save(STATE);
+}
+function clearMistake(q){
+  if(STATE.mistakes[q.q]){ delete STATE.mistakes[q.q]; save(STATE); }
+}
+function mistakeCount(){ return Object.keys(STATE.mistakes).length; }
 
 // ---------- 問題生成：日本編 ----------
 function japanPrefs(stage){
@@ -46,20 +97,16 @@ function buildJapanQuestions(stage){
   const pool = [];
 
   prefs.forEach(p=>{
-    pool.push(makeChoice(`${p.name}の県庁所在地は？`, p.capital, allCaps));
-    pool.push(makeChoice(`県庁所在地が「${p.capital}」なのは？`, p.name, allNames));
-    pool.push(makeChoice(`${p.name}の名産は？`, p.meibutsu, allMeib));
-    pool.push(makeChoice(`${p.name}は何地方？`, p.region, REGION_LIST));
+    pool.push(makeChoice(`${p.name}の県庁所在地は？`, p.capital, allCaps, `${p.name}の県庁所在地は${p.capital}。`));
+    pool.push(makeChoice(`県庁所在地が「${p.capital}」なのは？`, p.name, allNames, p.note));
+    pool.push(makeChoice(`${p.name}の名産は？`, p.meibutsu, allMeib, p.note));
+    pool.push(makeChoice(`${p.name}は何地方？`, p.region, REGION_LIST, p.note));
   });
 
   // 地形・気候クイズ（このステージの県/地方に関係するもの）
   GEO_QUIZ.forEach(g=>{
-    const ans = g.a;
-    const relevant = prefs.some(p=>p.name===ans) || stage.regions.includes(ans);
-    if(relevant){
-      const options = shuffle([g.a, ...g.choices]);
-      pool.push({ type:"choice", q:g.q, options, answer:options.indexOf(g.a) });
-    }
+    const relevant = prefs.some(p=>p.name===g.a) || stage.regions.includes(g.a);
+    if(relevant) pool.push(curatedToQ(g));
   });
 
   // 並べ替え：北から順（PREFECTURES配列の並び＝おおむね北→南）。1問は必ず入れる。
@@ -87,13 +134,13 @@ function buildWorldQuestions(stage){
 
   function qFor(c, emphasize){
     const arr = [
-      makeChoice(`${c.name}の首都は？`, c.capital, allCaps),
-      makeChoice(`首都が「${c.capital}」の国は？`, c.name, allNames),
-      makeChoice(`${c.name}は何大陸（地域）にある？`, c.continent, continents),
+      makeChoice(`${c.name}の首都は？`, c.capital, allCaps, `${c.name}の首都は${c.capital}。${c.feature}`),
+      makeChoice(`首都が「${c.capital}」の国は？`, c.name, allNames, c.feature),
+      makeChoice(`${c.name}は何大陸（地域）にある？`, c.continent, continents, c.feature),
       makeChoice(`${c.name}の特ちょうに合うのは？`, c.feature, allFeat),
       { type:"choice", q:`${c.name}の国旗は？`,
         options: shuffle([c.flag, ...sample(allFlags.filter(f=>f!==c.flag),3)]),
-        answer: -1 },
+        answer: -1, exp:`${c.name}の国旗は ${c.flag} 。` },
     ];
     // 国旗問題の正解indexを設定
     arr[4].answer = arr[4].options.indexOf(c.flag);
@@ -112,11 +159,63 @@ function buildWorldQuestions(stage){
   return shuffle([orderQ, ...sample(pool, QPER-1)]);
 }
 
+// ---------- 問題生成：深掘りドリル ----------
+function buildDrillQuestions(stage){
+  return sample(stage.quiz, Math.min(QPER, stage.quiz.length)).map(item=>
+    item.type==="input"
+      ? { type:"input", q:item.q, accept:item.accept, ans:item.ans, exp:item.exp }
+      : curatedToQ(item)
+  );
+}
+
+// ---------- 問題生成：にがて復習 ----------
+function buildReviewQuestions(){
+  const pool = Object.values(STATE.mistakes);
+  return sample(pool, Math.min(QPER, pool.length)).map(m=>{
+    if(m.type==="choice"){
+      const options = shuffle(m.options);
+      return { type:"choice", q:m.q, options, answer:options.indexOf(m.a), exp:m.exp };
+    }
+    return m; // input / order はそのまま（orderは表示時にシャッフルされる）
+  });
+}
+
+// ---------- 問題生成：テストモード ----------
+function buildTestQuestions(){
+  const pool = [];
+  const allCaps = PREFECTURES.map(p=>p.capital);
+  const allMeib = PREFECTURES.map(p=>p.meibutsu);
+  sample(PREFECTURES, 8).forEach(p=>{
+    const qs = [
+      makeChoice(`${p.name}の県庁所在地は？`, p.capital, allCaps, `${p.name}の県庁所在地は${p.capital}。`),
+      makeChoice(`${p.name}の名産は？`, p.meibutsu, allMeib, p.note),
+      makeChoice(`${p.name}は何地方？`, p.region, REGION_LIST, p.note),
+    ];
+    pool.push(qs[Math.floor(Math.random()*qs.length)]);
+  });
+  const cCaps = COUNTRIES.map(c=>c.capital);
+  const continents = [...new Set(COUNTRIES.map(c=>c.continent))];
+  sample(COUNTRIES, 6).forEach(c=>{
+    const qs = [
+      makeChoice(`${c.name}の首都は？`, c.capital, cCaps, `${c.name}の首都は${c.capital}。${c.feature}`),
+      makeChoice(`${c.name}は何大陸（地域）にある？`, c.continent, continents, c.feature),
+    ];
+    pool.push(qs[Math.floor(Math.random()*qs.length)]);
+  });
+  sample(GEO_QUIZ, 5).forEach(g=> pool.push(curatedToQ(g)));
+  DEEP_STAGES.forEach(st=> sample(st.quiz, 2).forEach(item=>{
+    pool.push(item.type==="input"
+      ? { type:"input", q:item.q, accept:item.accept, ans:item.ans, exp:item.exp }
+      : curatedToQ(item));
+  }));
+  return sample(pool, Math.min(TEST_N, pool.length));
+}
+
 // ---------- 画面表示 ----------
 const app = () => document.getElementById("app");
 
 function setBG(mode){
-  document.body.className = mode; // "japan" / "world" / ""
+  document.body.className = (mode==="japan"||mode==="world") ? mode : "";
 }
 
 // 経度緯度 → メルカトル図法のSVG座標（world-geo.js と同じ式）
@@ -128,16 +227,23 @@ function merc(lon, lat){
 function lonlat(c){ return merc(c.lon, c.lat); }
 
 function renderHome(){
+  stopTimer();
   setBG("");
   const unlocked = STATE.worldUnlocked || isJapanAllCleared();
   if(unlocked) STATE.worldUnlocked = true, save(STATE);
   const jpDone = JAPAN_STAGES.filter(s=>STATE.japan[s.id]&&STATE.japan[s.id].cleared).length;
   const wDone = WORLD_STAGES.filter(s=>STATE.world[s.id]&&STATE.world[s.id].cleared).length;
+  const dDone = DEEP_STAGES.filter(s=>STATE.drill[s.id]&&STATE.drill[s.id].cleared).length;
   const stampCount = Object.keys(STATE.stamps).length;
+  const nMistakes = mistakeCount();
+  const streak = streakDays();
 
   const root = el("div","screen home");
   root.appendChild(el("div","logo","🌏 伶奈の地理勉強アプリ"));
   root.appendChild(el("p","tagline","日本を旅して、世界一周にでかけよう！"));
+  root.appendChild(el("div","streak", streak>0
+    ? `🔥 れんぞく学習 <b>${streak}日</b>${STATE.streak.last===dstr(new Date())?"（今日もクリア！）":"（今日もがんばろう！）"}`
+    : "🔥 今日から連続記録をスタートしよう！"));
 
   // 日本編カード
   const jp = el("button","menu-card jp");
@@ -164,6 +270,40 @@ function renderHome(){
   }
   root.appendChild(w);
 
+  // 深掘りドリル
+  const d = el("button","menu-card drill");
+  d.innerHTML = `<div class="mc-emoji">⛰️</div>
+    <div class="mc-body"><div class="mc-title">深掘りドリル</div>
+    <div class="mc-sub">自然・気候・産業・世界のすがた</div>
+    <div class="mc-prog">クリア ${dDone} / ${DEEP_STAGES.length} テーマ</div></div>`;
+  d.onclick = ()=>renderDrillSelect();
+  root.appendChild(d);
+
+  // にがて復習
+  const r = el("button","menu-card review"+(nMistakes?"":" locked"));
+  if(nMistakes){
+    r.innerHTML = `<div class="mc-emoji">🔁</div>
+      <div class="mc-body"><div class="mc-title">にがて復習</div>
+      <div class="mc-sub">間違えた問題にもう一度ちょうせん</div>
+      <div class="mc-prog">にがて ${nMistakes} 問</div></div>`;
+    r.onclick = ()=>startQuiz("review", {id:"review", title:"にがて復習", emoji:"🔁"});
+  }else{
+    r.innerHTML = `<div class="mc-emoji">✨</div>
+      <div class="mc-body"><div class="mc-title">にがて復習</div>
+      <div class="mc-sub">間違えた問題がここにたまるよ</div>
+      <div class="mc-prog">いまはゼロ！パーフェクト</div></div>`;
+  }
+  root.appendChild(r);
+
+  // テストモード
+  const t = el("button","menu-card test");
+  t.innerHTML = `<div class="mc-emoji">📝</div>
+    <div class="mc-body"><div class="mc-title">実力テスト</div>
+    <div class="mc-sub">10分で20問・全範囲から出題</div>
+    <div class="mc-prog">${STATE.testBest!=null? `さいこう記録 ${STATE.testBest} / ${TEST_N} 問` : "テスト前の力だめしに！"}</div></div>`;
+  t.onclick = ()=>startQuiz("test", {id:"test", title:"実力テスト", emoji:"📝"});
+  root.appendChild(t);
+
   // コレクション
   const col = el("button","menu-card col");
   col.innerHTML = `<div class="mc-emoji">🎒</div>
@@ -176,6 +316,7 @@ function renderHome(){
 }
 
 function renderStageSelect(mode){
+  stopTimer();
   if(mode==="world"){ setBG("world"); } else { setBG("japan"); }
   const stages = mode==="japan"? JAPAN_STAGES : WORLD_STAGES;
   const store = mode==="japan"? STATE.japan : STATE.world;
@@ -208,6 +349,37 @@ function renderStageSelect(mode){
     grid.appendChild(b);
   });
   root.appendChild(grid);
+
+  app().innerHTML=""; app().appendChild(root);
+}
+
+// 深掘りドリルのステージ選択（全ステージ最初からひらいている）
+function renderDrillSelect(){
+  stopTimer();
+  setBG("");
+  const root = el("div","screen select");
+  const head = el("div","select-head");
+  const back = el("button","back","← もどる"); back.onclick=renderHome;
+  head.appendChild(back);
+  head.appendChild(el("h2",null,"⛰️ 深掘りドリル"));
+  root.appendChild(head);
+
+  const groups = [...new Set(DEEP_STAGES.map(s=>s.group))];
+  groups.forEach(g=>{
+    root.appendChild(el("h3","col-h",(g.startsWith("日本")?"🗾 ":"🌏 ")+g));
+    const grid = el("div","stage-grid");
+    DEEP_STAGES.filter(s=>s.group===g).forEach(st=>{
+      const rec = STATE.drill[st.id]||{};
+      const b = el("button","stage-card"+(rec.cleared?" cleared":""));
+      b.innerHTML = `<div class="sc-emoji">${st.emoji}</div>
+        <div class="sc-title">${st.title}</div>
+        <div class="sc-sub">${st.sub}</div>
+        ${rec.cleared?`<div class="sc-badge">★ ${rec.best}/${QPER}</div>`:""}`;
+      b.onclick = ()=>startQuiz("drill", st);
+      grid.appendChild(b);
+    });
+    root.appendChild(grid);
+  });
 
   app().innerHTML=""; app().appendChild(root);
 }
@@ -335,9 +507,30 @@ function resizePhoto(dataUrl, size, cb){
 
 // ---------- クイズ ----------
 let QUIZ = null;
+let TIMER = null;
+function stopTimer(){ if(TIMER){ clearInterval(TIMER); TIMER=null; } }
+function fmtTime(sec){ return Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0"); }
+
 function startQuiz(mode, stage){
-  const qs = mode==="japan"? buildJapanQuestions(stage) : buildWorldQuestions(stage);
+  stopTimer();
+  let qs;
+  if(mode==="japan") qs = buildJapanQuestions(stage);
+  else if(mode==="world") qs = buildWorldQuestions(stage);
+  else if(mode==="drill") qs = buildDrillQuestions(stage);
+  else if(mode==="review") qs = buildReviewQuestions();
+  else qs = buildTestQuestions();
+  if(!qs.length){ renderHome(); return; }
   QUIZ = { mode, stage, qs, idx:0, correct:0 };
+  if(mode==="test"){
+    QUIZ.deadline = Date.now() + TEST_TIME*1000;
+    TIMER = setInterval(()=>{
+      if(!QUIZ) { stopTimer(); return; }
+      const left = Math.max(0, Math.ceil((QUIZ.deadline-Date.now())/1000));
+      const t = document.getElementById("qtimer");
+      if(t){ t.textContent = "⏱ "+fmtTime(left); if(left<=60) t.classList.add("hurry"); }
+      if(left<=0){ stopTimer(); QUIZ.timeup = true; renderResult(); }
+    }, 250);
+  }
   renderQuestion();
 }
 
@@ -348,7 +541,9 @@ function renderQuestion(){
   // ヘッダー
   const head = el("div","quiz-head");
   head.appendChild(el("div","q-stage", `${QUIZ.stage.emoji} ${QUIZ.stage.title}`));
-  head.appendChild(el("div","q-count", `${idx+1} / ${qs.length}　⭕${correct}`));
+  head.appendChild(el("div","q-count",
+    (QUIZ.mode==="test"?`<span id="qtimer" class="q-timer">⏱ --:--</span>　`:"")
+    + `${idx+1} / ${qs.length}　⭕${correct}`));
   root.appendChild(head);
   // 進捗バー
   const bar = el("div","qbar"); bar.appendChild(el("div","qbar-fill"));
@@ -361,31 +556,85 @@ function renderQuestion(){
     const opts = el("div","options");
     q.options.forEach((o,i)=>{
       const b = el("button","opt", o);
-      b.onclick = ()=>answerChoice(b, i, q.answer, opts);
+      b.onclick = ()=>answerChoice(b, i, q, opts);
       opts.appendChild(b);
     });
     root.appendChild(opts);
   } else if(q.type==="order"){
     root.appendChild(renderOrder(q));
+  } else if(q.type==="input"){
+    root.appendChild(renderInput(q, root));
   }
   app().innerHTML=""; app().appendChild(root);
+  if(q.type==="input"){
+    const inp = root.querySelector(".kaki-input");
+    if(inp) setTimeout(()=>inp.focus(), 150);
+  }
 }
 
-function answerChoice(btn, picked, answer, container){
+// 答えたあとの解説＋「つぎへ」ボタン
+function showFeedback(ok, q){
+  const root = document.querySelector(".screen.quiz");
+  if(!root) return;
+  const box = el("div","exp-box "+(ok?"good":"bad"));
+  let html = `<div class="exp-head">${ok?"⭕ せいかい！":"❌ ざんねん…"}</div>`;
+  if(!ok){
+    const ans = q.type==="choice"? q.options[q.answer] : (q.type==="input"? q.ans : null);
+    if(ans) html += `<div class="exp-ans">正解：${ans}</div>`;
+  }
+  if(q.exp) html += `<div class="exp-text">💡 ${q.exp}</div>`;
+  box.innerHTML = html;
+  const next = el("button","next-btn", QUIZ.idx+1>=QUIZ.qs.length ? "けっかを見る →" : "つぎへ →");
+  next.onclick = nextQuestion;
+  box.appendChild(next);
+  root.appendChild(box);
+  box.scrollIntoView({behavior:"smooth", block:"end"});
+}
+
+function answerChoice(btn, picked, q, container){
   if(container.dataset.done) return;
   container.dataset.done="1";
   const btns = [...container.children];
   btns.forEach(b=>b.disabled=true);
-  if(picked===answer){
+  const ok = picked===q.answer;
+  if(ok){
     btn.classList.add("correct");
     QUIZ.correct++;
     play("ok");
+    clearMistake(q);
   }else{
     btn.classList.add("wrong");
-    btns[answer].classList.add("correct");
+    btns[q.answer].classList.add("correct");
     play("ng");
+    recordMistake(q);
   }
-  setTimeout(nextQuestion, 850);
+  showFeedback(ok, q);
+}
+
+// 書き取り（入力式）問題
+function renderInput(q){
+  const wrap = el("div","kaki-wrap");
+  const inp = document.createElement("input");
+  inp.className = "kaki-input";
+  inp.type = "text";
+  inp.placeholder = "ここに答えを書こう";
+  inp.autocomplete = "off";
+  const ok = el("button","order-submit","こたえる！");
+  const check = ()=>{
+    if(ok.disabled) return;
+    const v = normalizeAns(inp.value);
+    if(!v){ inp.focus(); return; }
+    ok.disabled = true; inp.disabled = true;
+    const good = q.accept.some(a=>normalizeAns(a)===v);
+    if(good){ QUIZ.correct++; play("ok"); inp.classList.add("good"); clearMistake(q); }
+    else { play("ng"); inp.classList.add("bad"); recordMistake(q); }
+    showFeedback(good, q);
+  };
+  ok.onclick = check;
+  inp.addEventListener("keydown", e=>{ if(e.key==="Enter") check(); });
+  wrap.appendChild(inp);
+  wrap.appendChild(ok);
+  return wrap;
 }
 
 function renderOrder(q){
@@ -415,13 +664,13 @@ function renderOrder(q){
   ok.onclick = ()=>{
     ok.disabled=true;
     const correct = order.every((it,i,arr)=> i===0 || arr[i-1].value <= it.value);
-    if(correct){ QUIZ.correct++; play("ok"); ok.textContent="せいかい！⭕"; ok.classList.add("correct"); }
-    else { play("ng"); ok.textContent="ざんねん…正しい順を表示中"; ok.classList.add("wrong");
+    if(correct){ QUIZ.correct++; play("ok"); ok.textContent="せいかい！⭕"; ok.classList.add("correct"); clearMistake(q); }
+    else { play("ng"); ok.textContent="ざんねん…正しい順を表示中"; ok.classList.add("wrong"); recordMistake(q);
       // 正解順を表示
       order = q.items.slice().sort((a,b)=>a.value-b.value); draw();
       [...list.querySelectorAll(".oc")].forEach(b=>b.disabled=true);
     }
-    setTimeout(nextQuestion, 1300);
+    showFeedback(correct, q);
   };
   wrap.appendChild(ok);
   return wrap;
@@ -435,9 +684,16 @@ function nextQuestion(){
 
 // ---------- 結果 ----------
 function renderResult(){
+  stopTimer();
   const {mode, stage, correct, qs} = QUIZ;
+  bumpStreak();
+
+  // にがて復習・テストは専用の結果画面
+  if(mode==="review"){ save(STATE); renderReviewResult(); return; }
+  if(mode==="test"){ renderTestResult(); return; }
+
   const passed = correct>=PASS;
-  const store = mode==="japan"? STATE.japan : STATE.world;
+  const store = mode==="japan"? STATE.japan : mode==="world"? STATE.world : STATE.drill;
   const prev = store[stage.id]||{cleared:false,best:0};
   store[stage.id] = { cleared: prev.cleared||passed, best: Math.max(prev.best, correct) };
 
@@ -447,6 +703,8 @@ function renderResult(){
     if(mode==="world"){
       const c = COUNTRIES.find(x=>x.id===stage.countryId);
       if(!STATE.stamps[c.id]){ STATE.stamps[c.id]={name:c.name, flag:c.flag, kind:"world"}; newStamp=`${c.flag} ${c.name}`; }
+    }else if(mode==="drill"){
+      if(!STATE.stamps[stage.id]){ STATE.stamps[stage.id]={name:stage.title, flag:stage.emoji, kind:"drill"}; newStamp=`${stage.emoji} ${stage.title}`; }
     }else{
       if(!STATE.stamps[stage.id]){ STATE.stamps[stage.id]={name:stage.title, flag:stage.emoji, kind:"japan"}; newStamp=`${stage.emoji} ${stage.title}`; }
     }
@@ -465,10 +723,13 @@ function renderResult(){
     : `クリアまであと ${Math.max(0,PASS-correct)} 問。もう一度ちょうせん！`));
   if(newStamp) root.appendChild(el("div","res-stamp", `🎁 おみやげ獲得：${newStamp}`));
   if(justUnlocked) root.appendChild(el("div","res-unlock", "✈️ 日本制覇！『海外編 世界一周』がひらいたよ！"));
+  const nMistakes = mistakeCount();
+  if(!passed && nMistakes) root.appendChild(el("div","res-msg",`🔁 間違えた問題は「にがて復習」（${nMistakes}問）にたまっているよ`));
 
   const btns = el("div","res-btns");
   const retry = el("button","btn","もう一度"); retry.onclick=()=>startQuiz(mode,stage);
-  const list = el("button","btn ghost","ステージ選択へ"); list.onclick=()=>renderStageSelect(mode);
+  const list = el("button","btn ghost","ステージ選択へ");
+  list.onclick = mode==="drill"? renderDrillSelect : ()=>renderStageSelect(mode);
   const home = el("button","btn ghost","ホーム"); home.onclick=renderHome;
   btns.appendChild(retry); btns.appendChild(list); btns.appendChild(home);
   root.appendChild(btns);
@@ -476,8 +737,66 @@ function renderResult(){
   app().innerHTML=""; app().appendChild(root);
 }
 
+function renderReviewResult(){
+  const {correct, qs} = QUIZ;
+  const remain = mistakeCount();
+  setBG("");
+  const root = el("div","screen result");
+  const allGone = remain===0;
+  root.appendChild(el("div","res-emoji", allGone?"🌟":"🔁"));
+  root.appendChild(el("h2",null, allGone?"にがて全クリア！":"復習おつかれさま！"));
+  root.appendChild(el("div","res-score", `${correct} / ${qs.length} 問せいかい`));
+  root.appendChild(el("div","res-msg", allGone
+    ? "にがてが全部なくなったよ！すごい！"
+    : `のこりのにがては ${remain} 問。くり返せば必ずへるよ！`));
+
+  const btns = el("div","res-btns");
+  if(!allGone){
+    const retry = el("button","btn","つづけて復習");
+    retry.onclick=()=>startQuiz("review", QUIZ.stage);
+    btns.appendChild(retry);
+  }
+  const home = el("button","btn ghost","ホーム"); home.onclick=renderHome;
+  btns.appendChild(home);
+  root.appendChild(btns);
+  if(allGone) confetti(root);
+  app().innerHTML=""; app().appendChild(root);
+}
+
+function renderTestResult(){
+  const {correct, qs, timeup} = QUIZ;
+  const pct = correct/qs.length;
+  const rank = pct>=0.9? {r:"S", e:"🏆", m:"パーフェクトにあと一歩！天才！"}
+             : pct>=0.75? {r:"A", e:"🥇", m:"すばらしい！テスト本番もばっちり！"}
+             : pct>=0.5?  {r:"B", e:"🥈", m:"いい調子！にがて復習でAを目指そう！"}
+             :            {r:"C", e:"💪", m:"まだまだこれから！ドリルで力をつけよう！"};
+  const isBest = STATE.testBest==null || correct>STATE.testBest;
+  if(isBest) STATE.testBest = correct;
+  save(STATE);
+
+  setBG("");
+  const root = el("div","screen result");
+  root.appendChild(el("div","res-emoji", rank.e));
+  root.appendChild(el("h2",null, timeup? "時間切れ！" : "テスト終了！"));
+  root.appendChild(el("div","res-rank", `ランク ${rank.r}`));
+  root.appendChild(el("div","res-score", `${correct} / ${qs.length} 問せいかい`));
+  root.appendChild(el("div","res-msg", rank.m));
+  if(isBest) root.appendChild(el("div","res-stamp","✨ さいこう記録こうしん！"));
+  const remain = mistakeCount();
+  if(remain) root.appendChild(el("div","res-msg",`🔁 間違えた問題は「にがて復習」（${remain}問）で復習できるよ`));
+
+  const btns = el("div","res-btns");
+  const retry = el("button","btn","もう一度テスト"); retry.onclick=()=>startQuiz("test", QUIZ.stage);
+  const home = el("button","btn ghost","ホーム"); home.onclick=renderHome;
+  btns.appendChild(retry); btns.appendChild(home);
+  root.appendChild(btns);
+  if(pct>=0.75) confetti(root);
+  app().innerHTML=""; app().appendChild(root);
+}
+
 // ---------- コレクション ----------
 function renderCollection(){
+  stopTimer();
   setBG("");
   const root = el("div","screen collection");
   const head = el("div","select-head");
@@ -486,6 +805,7 @@ function renderCollection(){
   root.appendChild(head);
 
   const jpStamps = Object.values(STATE.stamps).filter(s=>s.kind==="japan");
+  const dStamps  = Object.values(STATE.stamps).filter(s=>s.kind==="drill");
   const wStamps  = Object.values(STATE.stamps).filter(s=>s.kind==="world");
 
   root.appendChild(el("h3","col-h","🗾 日本のスタンプ ("+jpStamps.length+"/"+JAPAN_STAGES.length+")"));
@@ -497,6 +817,16 @@ function renderCollection(){
     g1.appendChild(c);
   });
   root.appendChild(g1);
+
+  root.appendChild(el("h3","col-h","⛰️ 深掘りメダル ("+dStamps.length+"/"+DEEP_STAGES.length+")"));
+  const g3 = el("div","stamp-grid");
+  DEEP_STAGES.forEach(s=>{
+    const got = STATE.stamps[s.id];
+    const c = el("div","stamp"+(got?"":" empty"));
+    c.innerHTML = got? `<div class="st-emoji">${s.emoji}</div><div class="st-name">${s.title}</div>` : `<div class="st-emoji">？</div>`;
+    g3.appendChild(c);
+  });
+  root.appendChild(g3);
 
   root.appendChild(el("h3","col-h","🌏 世界のおみやげ ("+wStamps.length+"/"+COUNTRIES.length+")"));
   const g2 = el("div","stamp-grid");
