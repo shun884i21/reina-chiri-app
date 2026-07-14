@@ -1,5 +1,5 @@
 // オフラインキャッシュ（壊れにくい版）
-const CACHE = "reina-chiri-v8";
+const CACHE = "reina-chiri-v9";
 const ASSETS = [
   "./", "./index.html", "./style.css",
   "./data.js", "./world-geo.js", "./app.js",
